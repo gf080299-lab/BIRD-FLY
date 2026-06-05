@@ -1,0 +1,492 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Bird Fly</title>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body {
+            background-color: #111; font-family: 'Arial', sans-serif;
+            overflow: hidden; display: flex; justify-content: center; align-items: center;
+            height: 100vh; width: 100vw;
+        }
+        #gameContainer {
+            position: relative; width: 100%; max-width: 500px; height: 100vh; max-height: 800px;
+            box-shadow: 0 0 30px rgba(0,0,0,0.9); overflow: hidden;
+        }
+        canvas { display: block; width: 100%; height: 100%; }
+        #uiScreen {
+            position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+            display: flex; flex-direction: column; justify-content: center; align-items: center;
+            background: rgba(0, 0, 0, 0.6); color: white; text-align: center; z-index: 10;
+        }
+        h1 {
+            font-size: 36px; color: #f7d308; text-shadow: 3px 3px 0 #000;
+            margin-bottom: 15px; text-transform: uppercase; letter-spacing: 2px;
+        }
+        p { font-size: 18px; margin-bottom: 20px; text-shadow: 1px 1px 0 #000; }
+        .btn {
+            padding: 14px 35px; font-size: 20px; font-weight: bold;
+            background-color: #ff5722; color: white; border: 3px solid #000;
+            border-radius: 10px; cursor: pointer; box-shadow: 0 6px 0 #b3360e;
+            text-transform: uppercase; margin-top: 10px;
+        }
+        .btn:active { transform: translateY(4px); box-shadow: 0 2px 0 #b3360e; }
+        
+        /* SCORE DISPLAY CONTAINER */
+        #scoreDisplay {
+            position: absolute; top: 20px; left: 20px;
+            font-size: 35px; font-weight: bold; color: white; text-shadow: 2px 2px 0 #000;
+            z-index: 5; display: none; pointer-events: none;
+        }
+        
+        /* NEW PERMANENT WIN BOX DISPLAY */
+        #winBox {
+            position: absolute; top: 20px; right: 20px;
+            font-size: 24px; font-weight: bold; color: #f7d308; 
+            background: rgba(0,0,0,0.5); padding: 5px 15px;
+            border: 2px solid #f7d308; border-radius: 8px;
+            text-shadow: 1px 1px 0 #000;
+            z-index: 5; display: block; pointer-events: none;
+        }
+        
+        #stageAlert {
+            position: absolute; top: 80px; width: 100%; text-align: center;
+            font-size: 22px; font-weight: bold; color: #ffeb3b; text-shadow: 2px 2px 0 #000;
+            z-index: 5; display: none; text-transform: uppercase;
+        }
+    </style>
+</head>
+<body>
+
+    <div id="gameContainer">
+        <div id="scoreDisplay">0</div>
+        <!-- WIN BOX ON THE TOP RIGHT -->
+        <div id="winBox">WINS: 0</div>
+        <div id="stageAlert">CHAPTER 1: START</div>
+        
+        <div id="uiScreen">
+            <h1 id="menuTitle">Bird Fly</h1>
+            <p id="menuSub">HELP THE BIRD REACH HOME SAFELY</p>
+            <button class="btn" id="startBtn">START GAME</button>
+        </div>
+
+        <canvas id="gameCanvas"></canvas>
+    </div>
+
+<script>
+    const canvas = document.getElementById("gameCanvas");
+    const ctx = canvas.getContext("2d");
+    const uiScreen = document.getElementById("uiScreen");
+    const startBtn = document.getElementById("startBtn");
+    const menuTitle = document.getElementById("menuTitle");
+    const menuSub = document.getElementById("menuSub");
+    const scoreDisplay = document.getElementById("scoreDisplay");
+    const winBox = document.getElementById("winBox");
+    const stageAlert = document.getElementById("stageAlert");
+
+    function resizeCanvas() {
+        canvas.width = canvas.parentElement.clientWidth;
+        canvas.height = canvas.parentElement.clientHeight;
+    }
+    resizeCanvas();
+
+    // WINS SAVE & LOAD SYSTEM (LocalStorage)
+    let savedWins = localStorage.getItem("birdFlyTotalWins");
+    let totalWins = savedWins ? parseInt(savedWins) : 0;
+    winBox.innerText = "WINS: " + totalWins;
+
+    let gameState = "MENU"; 
+    let currentChapter = 1;
+    let score = 0;
+    let frames = 0;
+    let mode = "PIPES"; 
+
+    let ch2AnimTimer = 0;
+    let ch3AnimTimer = 0; 
+    let hunterX = 600; 
+    let tornadoProgress = 0; 
+    let fireworks = [];
+
+    function drawRealisticCloudShape(x, y, size, isDark) {
+        ctx.save();
+        ctx.beginPath();
+        let baseColor = isDark ? 100 : 255;
+        let shadowColor = isDark ? 60 : 210;
+        
+        let grad = ctx.createRadialGradient(x, y, size * 0.2, x, y, size);
+        grad.addColorStop(0, `rgba(${baseColor}, ${baseColor}, ${baseColor}, 0.95)`);
+        grad.addColorStop(0.7, `rgba(${shadowColor}, ${shadowColor}, ${shadowColor}, 0.9)`);
+        grad.addColorStop(1, "rgba(200, 200, 200, 0)");
+        ctx.fillStyle = grad;
+
+        ctx.arc(x, y, size, 0, Math.PI * 2);
+        ctx.arc(x - size * 0.5, y + size * 0.1, size * 0.65, 0, Math.PI * 2);
+        ctx.arc(x + size * 0.5, y + size * 0.1, size * 0.65, 0, Math.PI * 2);
+        ctx.arc(x - size * 0.2, y - size * 0.4, size * 0.55, 0, Math.PI * 2);
+        ctx.arc(x + size * 0.2, y - size * 0.4, size * 0.55, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.restore();
+    }
+
+    const bullets = {
+        list: [],
+        update() {
+            if (gameState !== "PLAYING" || currentChapter !== 2) return;
+            if (frames % 120 === 0 && ch2AnimTimer <= 0) {
+                this.list.push({ x: hunterX - 10, y: canvas.height - 75, vx: -3.2, vy: -3.2 });
+            }
+            for (let i = this.list.length - 1; i >= 0; i--) {
+                let b = this.list[i]; b.x += b.vx; b.y += b.vy;
+                let distX = bird.x - b.x; let distY = bird.y - b.y;
+                if (Math.sqrt(distX*distX + distY*distY) < bird.radius + 3) gameOver();
+                if (b.y < 0 || b.x < 0) this.list.splice(i, 1);
+            }
+        },
+        draw() {
+            ctx.fillStyle = "red";
+            for (let b of this.list) { ctx.beginPath(); ctx.arc(b.x, b.y, 4, 0, Math.PI * 2); ctx.fill(); }
+        }
+    };
+
+    const bird = {
+        x: 90, y: canvas.height / 2, radius: 13,
+        gravity: 0.30, velocity: 0, jump: -5.8, 
+        wingAngle: 0, wingDirection: 1,
+        draw() {
+            ctx.save(); ctx.translate(this.x, this.y);
+            let rotation = Math.min(Math.PI / 6, Math.max(-Math.PI / 12, this.velocity * 0.04));
+            
+            if (currentChapter === 3 && ch3AnimTimer > 0) {
+                rotation = Math.PI; 
+            } else if (ch2AnimTimer > 0) {
+                rotation = Math.sin(frames * 0.2) * 0.4; 
+            }
+            ctx.rotate(rotation);
+
+            ctx.fillStyle = currentChapter === 3 ? "#f44336" : "#f7d308"; 
+            ctx.beginPath(); ctx.arc(0, 0, this.radius, 0, Math.PI * 2); ctx.fill();
+            ctx.strokeStyle = "#000"; ctx.lineWidth = 2; ctx.stroke();
+
+            ctx.fillStyle = currentChapter === 3 ? "#b71c1c" : "#e0be04";
+            ctx.beginPath(); ctx.ellipse(-6, this.wingAngle, 8, 5, Math.PI/4, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+
+            ctx.fillStyle = "#fff"; ctx.beginPath(); ctx.arc(6, -4, 5, 0, Math.PI * 2); ctx.fill();
+            ctx.fillStyle = "#000"; ctx.beginPath(); ctx.arc(7, -4, 2, 0, Math.PI * 2); ctx.fill();
+            ctx.fillStyle = "#ff5722"; ctx.beginPath(); ctx.moveTo(12, -2); ctx.lineTo(22, 2); ctx.lineTo(12, 6); ctx.closePath(); ctx.fill(); ctx.stroke();
+            ctx.restore();
+        },
+        update() {
+            if (gameState === "PLAYING") {
+                if (ch2AnimTimer > 0) {
+                    ch2AnimTimer--; this.y = (canvas.height / 2) + Math.sin(frames * 0.1) * 20; return;
+                }
+                if (currentChapter === 3 && ch3AnimTimer > 0) {
+                    ch3AnimTimer--; this.y = canvas.height / 2; return; 
+                }
+
+                this.velocity += this.gravity; this.y += this.velocity;
+                this.wingAngle += 0.6 * this.wingDirection;
+                if (this.wingAngle > 4 || this.wingAngle < -4) this.wingDirection *= -1;
+
+                if (this.y + this.radius >= canvas.height - 40) gameOver();
+                if (this.y - this.radius <= 0) { this.y = this.radius; this.velocity = 0; }
+            }
+        },
+        reset() { this.y = canvas.height / 2; this.velocity = 0; }
+    };
+
+    const obstacles = {
+        pipesArray: [], cloudsArray: [],
+        pipeGap: 195, 
+        pipeWidth: 65, 
+        speed: 1.8,   
+        update() {
+            if (gameState !== "PLAYING" || ch2AnimTimer > 0 || ch3AnimTimer > 0) return;
+
+            if (currentChapter === 1) {
+                if (score >= 0 && score < 12) { mode = "PIPES"; stageAlert.innerText = "STAGE 1: BAMBU LEVEL"; stageAlert.style.color = "#ffeb3b"; }
+                else if (score >= 12 && score < 18) { mode = "CLOUDS"; stageAlert.innerText = "STAGE 2: CLOUD DANGER!"; stageAlert.style.color = "#ff5722"; }
+                else if (score >= 18 && score < 38) { mode = "PIPES_RETURN"; stageAlert.innerText = "STAGE 3: BAMBU TO HOME"; stageAlert.style.color = "#4caf50"; }
+                else if (score >= 38) { winChapter1(); return; }
+            } else if (currentChapter === 2) {
+                if (score >= 38 && score < 68) { mode = "HUNTER_BAMBU"; stageAlert.innerText = "CHAP 2: SHIKARI + 30 BAMBU"; stageAlert.style.color = "#ff9800"; }
+                else if (score >= 68 && score < 72) { mode = "HUNTER_CLOUDS"; stageAlert.innerText = "FINAL: 4 CLOUDS TO HOME"; stageAlert.style.color = "#e91e63"; }
+                else if (score >= 72) { winChapter2(); return; }
+            } else if (currentChapter === 3) {
+                mode = "TORNADO_ESCAPE";
+                stageAlert.innerText = "CHAP 3: RUN FROM TORNADO! (SPEED: 60)";
+                stageAlert.style.color = "#f44336";
+                tornadoProgress += 1.4; 
+                if (tornadoProgress >= 500) { winGamePermanent(); return; }
+            }
+
+            if (mode === "TORNADO_ESCAPE") return;
+
+            if (mode === "PIPES" || mode === "PIPES_RETURN" || mode === "HUNTER_BAMBU") {
+                if (frames % 120 === 0) {
+                    let minH = 70; let maxH = canvas.height - this.pipeGap - 110;
+                    let topH = Math.floor(Math.random() * (maxH - minH + 1) + minH);
+                    this.pipesArray.push({ x: canvas.width, top: topH, scored: false });
+                }
+            }
+            if (mode === "CLOUDS" || mode === "HUNTER_CLOUDS") {
+                if (frames % 110 === 0) {
+                    let randomY = Math.floor(Math.random() * (canvas.height - 260)) + 70;
+                    this.cloudsArray.push({ x: canvas.width, y: randomY, r: 32, scored: false }); 
+                }
+            }
+
+            for (let i = this.pipesArray.length - 1; i >= 0; i--) {
+                let p = this.pipesArray[i]; p.x -= this.speed;
+                let bottomY = p.top + this.pipeGap;
+                
+                // Bird vs Top Pipe and Top Cap collision
+                if (bird.x + bird.radius > p.x - 4 && bird.x - bird.radius < p.x + this.pipeWidth + 4) {
+                    if (bird.y - bird.radius < p.top || bird.y + bird.radius > bottomY) gameOver();
+                }
+                if (p.x + this.pipeWidth / 2 <= bird.x && !p.scored) { score++; p.scored = true; scoreDisplay.innerText = score; }
+                if (p.x + this.pipeWidth < 0) this.pipesArray.splice(i, 1);
+            }
+
+            for (let i = this.cloudsArray.length - 1; i >= 0; i--) {
+                let c = this.cloudsArray[i]; c.x -= this.speed * 1.1;
+                let distX = Math.abs(bird.x - c.x); let distY = Math.abs(bird.y - c.y);
+                if (Math.sqrt(distX*distX + distY*distY) < bird.radius + c.r * 0.75) gameOver();
+                if (c.x <= bird.x && !c.scored) { score++; c.scored = true; scoreDisplay.innerText = score; }
+                if (c.x + 100 < 0) this.cloudsArray.splice(i, 1);
+            }
+        },
+        draw() {
+            for (let p of this.pipesArray) {
+                let bottomY = p.top + this.pipeGap;
+                let capHeight = 24;
+                let capOffset = 4; // Caps are wider than the pipe itself
+                
+                // --- TOP BAMBOO MAIN BODY ---
+                let gradTop = ctx.createLinearGradient(p.x, 0, p.x + this.pipeWidth, 0);
+                gradTop.addColorStop(0, "#123c14"); gradTop.addColorStop(0.2, "#388e3c"); 
+                gradTop.addColorStop(0.5, "#a5d6a7"); gradTop.addColorStop(0.8, "#2e7d32"); gradTop.addColorStop(1, "#0d2b0f");
+                ctx.fillStyle = gradTop; 
+                ctx.fillRect(p.x, 0, this.pipeWidth, p.top - capHeight);
+                ctx.strokeStyle = "#0d2b0f"; ctx.lineWidth = 2; 
+                ctx.strokeRect(p.x, -2, this.pipeWidth, p.top - capHeight + 2);
+                
+                // FIXED VISUALS: Top Pipe Cap (Circle/Box extension as requested from Screenshot 275)
+                let gradTopCap = ctx.createLinearGradient(p.x - capOffset, 0, p.x + this.pipeWidth + capOffset, 0);
+                gradTopCap.addColorStop(0, "#123c14"); gradTopCap.addColorStop(0.2, "#4caf50"); 
+                gradTopCap.addColorStop(0.5, "#c8e6c9"); gradTopCap.addColorStop(0.8, "#388e3c"); gradTopCap.addColorStop(1, "#0d2b0f");
+                ctx.fillStyle = gradTopCap;
+                ctx.fillRect(p.x - capOffset, p.top - capHeight, this.pipeWidth + (capOffset * 2), capHeight);
+                ctx.strokeRect(p.x - capOffset, p.top - capHeight, this.pipeWidth + (capOffset * 2), capHeight);
+                
+                // FIXED BLACK LINE SHADOW AT THE CAP BORDER
+                ctx.strokeStyle = "black"; ctx.lineWidth = 3;
+                ctx.beginPath(); ctx.moveTo(p.x - capOffset, p.top - 1); ctx.lineTo(p.x + this.pipeWidth + capOffset, p.top - 1); ctx.stroke();
+
+                // --- BOTTOM BAMBOO MAIN BODY ---
+                let gradBot = ctx.createLinearGradient(p.x, 0, p.x + this.pipeWidth, 0);
+                gradBot.addColorStop(0, "#123c14"); gradBot.addColorStop(0.2, "#388e3c"); 
+                gradBot.addColorStop(0.5, "#a5d6a7"); gradBot.addColorStop(0.8, "#2e7d32"); gradBot.addColorStop(1, "#0d2b0f");
+                ctx.fillStyle = gradBot; 
+                ctx.fillRect(p.x, bottomY + capHeight, this.pipeWidth, canvas.height - (bottomY + capHeight));
+                ctx.strokeStyle = "#0d2b0f"; ctx.lineWidth = 2;
+                ctx.strokeRect(p.x, bottomY + capHeight, this.pipeWidth, canvas.height - (bottomY + capHeight) + 2);
+                
+                // FIXED VISUALS: Bottom Pipe Cap (Authentic design matching Screenshot 275)
+                let gradBotCap = ctx.createLinearGradient(p.x - capOffset, 0, p.x + this.pipeWidth + capOffset, 0);
+                gradBotCap.addColorStop(0, "#123c14"); gradBotCap.addColorStop(0.2, "#4caf50"); 
+                gradBotCap.addColorStop(0.5, "#c8e6c9"); gradBotCap.addColorStop(0.8, "#388e3c"); gradBotCap.addColorStop(1, "#0d2b0f");
+                ctx.fillStyle = gradBotCap;
+                ctx.fillRect(p.x - capOffset, bottomY, this.pipeWidth + (capOffset * 2), capHeight);
+                ctx.strokeRect(p.x - capOffset, bottomY, this.pipeWidth + (capOffset * 2), capHeight);
+                
+                // FIXED BLACK LINE SHADOW AT THE BOTTOM CAP BORDER
+                ctx.strokeStyle = "black"; ctx.lineWidth = 3;
+                ctx.beginPath(); ctx.moveTo(p.x - capOffset, bottomY + capHeight + 1); ctx.lineTo(p.x + this.pipeWidth + capOffset, bottomY + capHeight + 1); ctx.stroke();
+            }
+
+            // Danger Clouds
+            for (let c of this.cloudsArray) {
+                drawRealisticCloudShape(c.x, c.y, c.r, false);
+            }
+        },
+        reset() { this.pipesArray = []; this.cloudsArray = []; }
+    };
+
+    function drawTornado(x, speedText) {
+        ctx.save();
+        let tWidth = 100;
+        let segments = 16;
+        let tHeight = canvas.height - 40;
+        
+        for(let i=0; i<segments; i++) {
+            let y = (tHeight / segments) * i;
+            let w = tWidth - (i * 5.5); 
+            let xOffset = Math.sin((frames * 0.4) + i) * 15; 
+            
+            let tGrad = ctx.createLinearGradient(x + xOffset - w/2, 0, x + xOffset + w/2, 0);
+            tGrad.addColorStop(0, "#212121"); tGrad.addColorStop(0.3, "#616161");
+            tGrad.addColorStop(0.5, "#9e9e9e"); tGrad.addColorStop(0.8, "#424242"); tGrad.addColorStop(1, "#111111");
+            ctx.fillStyle = tGrad;
+            
+            ctx.beginPath();
+            ctx.ellipse(x + xOffset, y, w, 12, 0, 0, Math.PI*2);
+            ctx.fill();
+        }
+        ctx.fillStyle = "white"; ctx.font = "bold 14px Arial";
+        ctx.fillText(`TORNADO: ${speedText} KM/H`, x - 40, 30);
+        ctx.restore();
+    }
+
+    function spawnFirework() {
+        let x = Math.random() * canvas.width;
+        let y = Math.random() * (canvas.height / 2);
+        let colors = ["#ff1744", "#00e676", "#29b6f6", "#ffea00", "#d500f9", "#ff9100"];
+        let color = colors[Math.floor(Math.random() * colors.length)];
+        for(let i=0; i<35; i++) {
+            let angle = Math.random() * Math.PI * 2;
+            let spd = Math.random() * 5 + 2;
+            fireworks.push({ x: x, y: y, vx: Math.cos(angle)*spd, vy: Math.sin(angle)*spd, alpha: 1, color: color, size: Math.random()*2 + 1.5 });
+        }
+    }
+
+    function updateDrawFireworks() {
+        for(let i=fireworks.length-1; i>=0; i--) {
+            let f = fireworks[i]; f.x += f.vx; f.y += f.vy; f.vy += 0.04; f.alpha -= 0.012;
+            if(f.alpha <= 0) { fireworks.splice(i, 1); continue; }
+            ctx.fillStyle = f.color; ctx.globalAlpha = f.alpha;
+            ctx.beginPath(); ctx.arc(f.x, f.y, f.size, 0, Math.PI*2); ctx.fill();
+        }
+        ctx.globalAlpha = 1.0; 
+    }
+
+    function drawEnvironment() {
+        if (currentChapter === 1) {
+            let sky = ctx.createLinearGradient(0,0,0, canvas.height); sky.addColorStop(0, "#4a90e2"); sky.addColorStop(1, "#9cdba2");
+            ctx.fillStyle = sky; ctx.fillRect(0,0, canvas.width, canvas.height);
+        } else if (currentChapter === 2) {
+            let sky = ctx.createLinearGradient(0,0,0, canvas.height); sky.addColorStop(0, "#ff7043"); sky.addColorStop(1, "#90a4ae");
+            ctx.fillStyle = sky; ctx.fillRect(0,0, canvas.width, canvas.height);
+        } else if (currentChapter === 3) {
+            ctx.fillStyle = "#37474f"; ctx.fillRect(0,0, canvas.width, canvas.height); 
+        }
+
+        bullets.draw();
+
+        if (currentChapter === 3 && gameState === "PLAYING") {
+            if (ch3AnimTimer <= 0) {
+                drawTornado(30, "50");
+                ctx.fillStyle = "yellow"; ctx.font = "bold 14px Arial";
+                ctx.fillText("YOUR SPEED: 60 KM/H", bird.x - 40, bird.y - 25);
+            } else {
+                let entryX = -100 + ((180 - ch3AnimTimer) * 0.75);
+                drawTornado(entryX, "50");
+            }
+
+            let homeX = canvas.width - (tornadoProgress - 380);
+            if (homeX < canvas.width + 100) {
+                ctx.fillStyle = "#5d4037"; ctx.fillRect(homeX, canvas.height - 75, 50, 35); 
+                ctx.fillStyle = "#ffb74d"; ctx.font = "bold 12px Arial"; ctx.fillText("HOME ??", homeX, canvas.height - 85);
+                ctx.fillStyle = "#f7d308"; ctx.beginPath(); ctx.arc(homeX + 15, canvas.height - 60, 6, 0, Math.PI*2); ctx.arc(homeX + 35, canvas.height - 60, 6, 0, Math.PI*2); ctx.fill();
+            }
+        }
+
+        ctx.fillStyle = "#ded895"; ctx.fillRect(0, canvas.height - 40, canvas.width, 40);
+        ctx.fillStyle = "#222"; ctx.fillRect(0, canvas.height - 40, canvas.width, 4);
+
+        if (currentChapter === 2 && gameState === "PLAYING") {
+            if (ch2AnimTimer > 0 && hunterX > canvas.width - 120) hunterX -= 3;
+            else if (ch2AnimTimer <= 0 && hunterX < canvas.width + 100) hunterX -= 0.1;
+            ctx.fillStyle = "#3e2723"; ctx.fillRect(hunterX, canvas.height - 75, 25, 35);
+            ctx.fillStyle = "#ffcc80"; ctx.beginPath(); ctx.arc(hunterX + 12, canvas.height - 83, 8, 0, Math.PI*2); ctx.fill();
+            ctx.strokeStyle = "#1b5e20"; ctx.lineWidth = 4; ctx.beginPath(); ctx.moveTo(hunterX + 5, canvas.height - 70); ctx.lineTo(hunterX - 25, canvas.height - 73); ctx.stroke(); 
+        }
+        
+        if (gameState === "GAME_WIN") updateDrawFireworks();
+    }
+
+    function action() { if (gameState === "PLAYING" && ch2AnimTimer <= 0 && ch3AnimTimer <= 0) bird.velocity = bird.jump; }
+
+    window.addEventListener("keydown", (e) => { if (e.code === "Space" || e.code === "ArrowUp") action(); });
+    canvas.addEventListener("click", action);
+    canvas.addEventListener("touchstart", (e) => { e.preventDefault(); action(); }, { passive: false });
+
+    startBtn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        if (gameState === "MENU" || gameState === "GAMEOVER" || gameState === "GAME_WIN") {
+            resetGame(); gameState = "PLAYING"; uiScreen.style.display = "none";
+            scoreDisplay.style.display = "block"; stageAlert.style.display = "block";
+        } else if (gameState === "CHAP1_WIN") {
+            currentChapter = 2; score = 38; scoreDisplay.innerText = score; ch2AnimTimer = 150; hunterX = canvas.width + 50;
+            gameState = "PLAYING"; uiScreen.style.display = "none"; scoreDisplay.style.display = "block"; stageAlert.style.display = "block";
+        } else if (gameState === "CHAP2_WIN") {
+            currentChapter = 3; score = 72; scoreDisplay.innerText = "???"; ch3AnimTimer = 180; tornadoProgress = 0;
+            gameState = "PLAYING"; uiScreen.style.display = "none"; scoreDisplay.style.display = "block"; stageAlert.style.display = "block";
+        }
+    });
+
+    function winChapter1() {
+        gameState = "CHAP1_WIN"; menuTitle.innerText = "CHAPTER 1 COMPLETE";
+        menuSub.innerHTML = "Congratulations! Chapter 1 Clear ????<br>Get ready for Chapter 2!";
+        startBtn.innerText = "GO TO CHAPTER 2"; uiScreen.style.display = "flex";
+        scoreDisplay.style.display = "none"; stageAlert.style.display = "none";
+    }
+
+    function winChapter2() {
+        gameState = "CHAP2_WIN"; menuTitle.innerText = "CHAPTER 2 COMPLETE";
+        menuSub.innerHTML = "Congratulations! You escaped the Hunter! ??<br><b>Warning: Tornado Storm Coming!</b>";
+        startBtn.innerText = "ENTER FINAL CHAPTER 3"; uiScreen.style.display = "flex";
+        scoreDisplay.style.display = "none"; stageAlert.style.display = "none";
+    }
+
+    // FIXED UPDATE: CHAPTER 3 CLEAR HONEY PAR PERMANENT 1 WIN INCREASE HO JAYEGA & LOCALSTORAGE ME SAVE HOGA!
+    function winGamePermanent() {
+        gameState = "GAME_WIN"; 
+        
+        totalWins++; // +1 Win on finishing Chapter 3
+        localStorage.setItem("birdFlyTotalWins", totalWins); // Permanently save to device storage
+        winBox.innerText = "WINS: " + totalWins; // Update Win Box text instantly
+        
+        menuTitle.innerText = "CONGRATULATIONS YOU WIN";
+        menuSub.innerHTML = "???? ?? <b>VICTORY!</b> ?? ????<br>Bird escaped the Tornado safely!<br><b>+1 WIN SAVED TO YOUR DEVICE!</b>";
+        startBtn.innerText = "PLAY AGAIN"; 
+        uiScreen.style.display = "flex"; scoreDisplay.style.display = "none"; stageAlert.style.display = "none";
+        
+        // Fireworks interval reset
+        let fireworkTimer = setInterval(() => {
+            if(gameState === "GAME_WIN") spawnFirework();
+            else clearInterval(fireworkTimer);
+        }, 220); 
+    }
+
+    function gameOver() {
+        gameState = "GAMEOVER"; 
+        menuTitle.innerText = "GAME OVER";
+        menuSub.innerHTML = `Failed in Chapter ${currentChapter}<br>Keep trying, family is waiting!`;
+        startBtn.innerText = "TRY AGAIN"; uiScreen.style.display = "flex";
+        scoreDisplay.style.display = "none"; stageAlert.style.display = "none";
+    }
+
+    function resetGame() {
+        frames = 0; obstacles.reset(); bullets.list = [];
+        if (currentChapter === 1) { score = 0; scoreDisplay.innerText = score; }
+        else if (currentChapter === 2) { score = 38; scoreDisplay.innerText = score; ch2AnimTimer = 150; hunterX = canvas.width - 100; }
+        else if (currentChapter === 3) { currentChapter = 1; score = 0; scoreDisplay.innerText = score; } // Loop back to chapter 1 on clean replay
+        bird.reset();
+    }
+
+    function loop() {
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        drawEnvironment();
+        obstacles.update(); obstacles.draw();
+        bullets.update();
+        bird.update(); bird.draw();
+        if (gameState === "PLAYING") frames++;
+        requestAnimationFrame(loop);
+    }
+    loop();
+</script>
+</body>
+</html>
